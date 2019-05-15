@@ -93,7 +93,7 @@ def get_user(username):
             ...
         }
     """
-    for city, users in USERS.items():
+    for _, users in USERS.items():
         for user in users:
             if user["name"] == username:
                 return user
