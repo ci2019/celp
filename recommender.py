@@ -14,7 +14,7 @@ def make_business_matrix(city):
     for business in BUSINESSES['city']:
         b_id = business["business_id"]
         for a in business:
-            df[a][b_id] = business[a]
+            df_business[a][b_id] = business[a]
 
     df_business = df_business.set_index('business_id')
     return df_business
