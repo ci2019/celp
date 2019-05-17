@@ -244,9 +244,11 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
         a = pivot_categories(extract_genres(make_business_matrix(city)))
         df_similarity_genres = create_similarity_matrix_categories(a)
         df_categories = df_similarity_genres.sort_values(
-            by=[business_id], ascending=True)[business_id]
+            by=[business_id], ascending=False)[business_id].head(11)
+        print(df_categories)
         # Get top ten businesses with info
         top_ten = [get_business(city, i) for i in df_categories.index.values]
+        top_ten.pop(0)
 
         # MSE testing
         df_ratings_training, df_ratings_test = split_data(
@@ -257,7 +259,7 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
         mse_genres = mse(predicted_ratings)
         print("MSE content based:", mse_genres)
 
-        return random.sample(top_ten, n)
+        return top_ten
 
     # Recommendation for home page of user
     if not city:
