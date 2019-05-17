@@ -1,14 +1,11 @@
-from data import CITIES, BUSINESSES, USERS, REVIEWS, TIPS, CHECKINS, get_business, get_user, get_reviews
+from data import CITIES, BUSINESSES, USERS, REVIEWS, TIPS, CHECKINS
 from pandas import Series, DataFrame
 from math import sqrt
 
+import sklearn.metrics.pairwise as pw
 import random
 import pandas as pd
 import numpy as np
-
-
-def square(a):
-    return a*a
 
 
 def make_business_matrix(city):
@@ -56,117 +53,135 @@ def make_rating_matrix():
     return df_ratings
 
 
-def get_rating(ratings, user_id, business_id):
-    """Given a userId and movieId, this function returns the corresponding rating.
-       Should return NaN if no rating exists."""
-    rating = ratings[ratings["user_id"] ==
-                     user_id][ratings["business_id"] == business_id].rating
-    if len(rating) == 0:
-        return np.nan
-    else:
-        return rating.values[0]
+def number_of_businesses(ratings):
+    """Determine the number of unique movie id's in the data.
+
+    Arguments:
+    ratings -- a dataFrame containing a column 'movieId'
+    """
+    return len(ratings['business_id'].unique())
 
 
-def pivot_ratings(ratings):
-    ratings = ratings.reset_index(drop=True)
-    """ takes a rating table as input and computes the utility matrix """
-    # get business and user id's
-    business_ids = ratings['business_id'].unique()
-    user_ids = ratings['user_id'].unique()
+def number_of_users(ratings):
+    """Determine the number of unique user id's in the data.
 
-    # create empty data frame
-    pivot_data = pd.DataFrame(np.nan, columns=user_ids,
-                              index=business_ids, dtype=float)
-
-    # use the function get_rating to fill the matrix
-    for business in business_ids:
-        for user in user_ids:
-            pivot_data[user][business] = get_rating(ratings, user, business)
-
-    return pivot_data
+    Arguments:
+    ratings -- a dataFrame containing a column 'userId'
+    """
+    return len(ratings['user_id'].unique())
 
 
-def get_points(matrix, id1):
-    matrix = matrix.fillna(0)
-    return matrix[matrix.index == id1].values[0]
+def number_of_ratings(ratings):
+    """Count the number of ratings of a dataset.
+
+    Arguments:
+    ratings -- a dataFrame.
+    """
+    return ratings.shape[0]
 
 
-def cosine_similarity(matrix, id1, id2):
-    """Compute cosine similarity between two rows."""
+def rating_density(ratings):
+    """Compute the ratings given a dataset.
 
-    # get all ratings for the point
-    selected_features = matrix.loc[id1].notna() & matrix.loc[id2].notna()
+    Arguments:
+    ratings -- a dataFrame contasining the columns 'userId' and 'movieId'
+    """
+    return number_of_ratings(ratings) / (number_of_businesses(ratings) * number_of_users(ratings))
 
-    # if no matching features, return NaN
-    if not selected_features.any():
-        return 0.0
 
-    # get the features from the matrix
-    features1 = matrix.loc[id1][selected_features]
-    features2 = matrix.loc[id2][selected_features]
+def split_data(data, d=0.75):
+    """Split data in a training and test set.
 
-    if len(features1) == 0 or len(features2) == 0:
-        return 0
+    Arguments:
+    data -- any dataFrame.
+    d    -- the fraction of data in the training set
+    """
+    np.random.seed(seed=5)
+    mask_test = np.random.rand(data.shape[0]) < d
+    return data[mask_test], data[~mask_test]
 
-    # check if points are the same
-    if np.array_equal(features1, features2):
-        return 1
 
-    # calculate range for for loop
-    total_range = 0
-    if len(features1) == 0:
-        total_range = len(features2)
-    else:
-        total_range = len(features1)
+def pivot_ratings(df):
+    """Creates a utility matrix for user ratings for movies
 
-    # calculate numerator
-    numerator = 0
-    numerator = (features1 * features2).sum()
+    Arguments:
+    df -- a dataFrame containing at least the columns 'movieId' and 'genres'
 
-    # calculate denominator
-    denominator = 0
-    features1_copy = [square(x) for x in features1]
-    features2_copy = [square(x) for x in features2]
-    denominator_left = sqrt(sum(features1_copy))
-    denominator_right = sqrt(sum(features2_copy))
-    denominator = denominator_left * denominator_right
-
-    # check if denominator is valid
-    if denominator == 0 or denominator is np.nan:
-        return 0.0
-
-    # calculate similarity
-    similarity = numerator / denominator
-
-    # check if similarity is number
-    if similarity is np.nan:
-        return 0.0
-
-    # else return similarity
-    return similarity
+    Output:
+    a matrix containing a rating in each cell. np.nan means that the user did not rate the movie
+    """
+    df = df.reset_index(drop=True)
+    return df.pivot_table(values='rating', columns='user_id', index='business_id')
 
 
 def create_similarity_matrix_cosine(matrix):
-    """ creates the similarity matrix based on cosine similarity """
-    similarity_matrix = pd.DataFrame(
-        0, index=matrix.index, columns=matrix.index, dtype=float)
-    for i in matrix.index:
-        for j in matrix.index:
-            similarity_matrix[i][j] = cosine_similarity(matrix, i, j)
-    return similarity_matrix
+    """Creates a adjusted(/soft) cosine similarity matrix.
+
+    Arguments:
+    matrix -- a utility matrix
+
+    Notes:
+    Missing values are set to 0. This is technically not a 100% correct, but is more convenient
+    for computation and does not have a big effect on the outcome.
+    """
+    mc_matrix = matrix - matrix.mean(axis=0)
+    return pd.DataFrame(pw.cosine_similarity(mc_matrix.fillna(0)), index=matrix.index, columns=matrix.index)
 
 
-def calculate_mean(matrix, id1):
-    matrix = matrix
-    return np.mean(matrix[id1])
+def predict_ratings(similarity, utility, to_predict):
+    """Predicts the predicted rating for the input test data.
+
+    Arguments:
+    similarity -- a dataFrame that describes the similarity between items
+    utility    -- a dataFrame that contains a rating for each user (columns) and each movie (rows).
+                  If a user did not rate an item the value np.nan is assumed.
+    to_predict -- A dataFrame containing at least the columns movieId and userId for which to do the predictions
+    """
+    # copy input (don't overwrite)
+    ratings_test_c = to_predict.copy()
+    # apply prediction to each row
+    ratings_test_c['predicted rating'] = to_predict.apply(lambda row: predict_ids(
+        similarity, utility, row['user_id'], row['business_id']), axis=1)
+    return ratings_test_c
+
+### Helper functions for predict_ratings_item_based ###
 
 
-def mean_center_columns(matrix):
-    centered_matrix = matrix.copy()
-    for i in matrix.columns.values:
-        mean = calculate_mean(matrix, i)
-        centered_matrix[i] = centered_matrix[i] - mean
-    return centered_matrix
+def predict_ids(similarity, utility, userId, itemId):
+    # select right series from matrices and compute
+    if userId in utility.columns and itemId in similarity.index:
+        return predict_vectors(utility.loc[:, userId], similarity[itemId])
+    return 0
+
+
+def predict_vectors(user_ratings, similarities):
+    # select only movies actually rated by user
+    relevant_ratings = user_ratings.dropna()
+
+    # select corresponding similairties
+    similarities_s = similarities[relevant_ratings.index]
+
+    # select neighborhood
+    similarities_s = similarities_s[similarities_s > 0.0]
+    relevant_ratings = relevant_ratings[similarities_s.index]
+
+    # if there's nothing left return a prediction of 0
+    norm = similarities_s.sum()
+    if(norm == 0):
+        return 0
+
+    # compute a weighted average (i.e. neighborhood is all)
+    return np.dot(relevant_ratings, similarities_s)/norm
+
+
+def mse(predicted_ratings):
+    """Computes the mean square error between actual ratings and predicted ratings
+
+    Arguments:
+    predicted_ratings -- a dataFrame containing the columns rating and predicted rating
+    """
+    diff = predicted_ratings['rating'] - predicted_ratings['predicted rating']
+    return (diff**2).mean()
 
 
 def recommend(user_id=None, business_id=None, city=None, n=10):
@@ -183,12 +198,20 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
         }
     """
 
-    utility_matrix = pivot_ratings(make_rating_matrix())
-    centered_utility_matrix = mean_center_columns(utility_matrix)
-    print(centered_utility_matrix)
+    df_ratings_training, df_ratings_test = split_data(
+        make_rating_matrix(), d=0.9)
 
-    similarity = create_similarity_matrix_cosine(centered_utility_matrix)
-    print(similarity)
+    utility_matrix = pivot_ratings(make_rating_matrix())
+    similarity = create_similarity_matrix_cosine(utility_matrix)
+
+    df_predicted_cf_item_based = predict_ratings(
+        similarity, utility_matrix, df_ratings_test[['user_id', 'business_id', 'rating']])
+    mse_item = mse(df_predicted_cf_item_based)
+
+    # print(df_predicted_cf_item_based)
+    # print(mse_item)
+    # print(similarity)
+    # print(make_rating_matrix())
 
     if not city:
         city = random.choice(CITIES)
