@@ -251,7 +251,7 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
         top_ten.pop(0)
 
         # MSE testing
-        df_ratings_training, df_ratings_test = split_data(
+        _, df_ratings_test = split_data(
             make_rating_matrix(), d=0.9)
         utility_matrix = pivot_ratings(make_rating_matrix())
         predicted_ratings = predict_ratings(df_similarity_genres, utility_matrix, df_ratings_test[[
@@ -274,7 +274,8 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
     utility_matrix_copy = utility_matrix.copy()
 
     # MSE testing
-    df_ratings_test = split_data(make_rating_matrix(), d=0.9)
+    _, df_ratings_test = split_data(
+        make_rating_matrix(), d=0.9)
     df_predicted_cf_item_based = predict_ratings(
         similarity, utility_matrix, df_ratings_test[['user_id', 'business_id', 'rating']])
     mse_item = mse(df_predicted_cf_item_based)
@@ -301,4 +302,4 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
     # Get top ten businesses with info
     top_ten = [get_business(city, i) for i in df.index.values]
 
-    return random.sample(top_ten, n)
+    return top_ten
