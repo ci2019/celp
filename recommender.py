@@ -1,4 +1,4 @@
-from data import CITIES, BUSINESSES, USERS, REVIEWS, TIPS, CHECKINS
+from data import CITIES, BUSINESSES, USERS, REVIEWS, TIPS, CHECKINS, get_business, get_user
 from pandas import Series, DataFrame
 from math import sqrt
 
@@ -198,21 +198,53 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
         }
     """
 
-    df_ratings_training, df_ratings_test = split_data(
-        make_rating_matrix(), d=0.9)
+    # Recommendation for business page
+    if business_id:
+        print("Business id found!", business_id)
+
+    # Recommendation for home page of user
+    if not city:
+        city = random.choice(CITIES)
+
+    # If user is not logged in return random business
+    if not user_id:
+        return random.sample(BUSINESSES[city], n)
 
     utility_matrix = pivot_ratings(make_rating_matrix())
     similarity = create_similarity_matrix_cosine(utility_matrix)
+    utility_matrix_copy = utility_matrix.copy()
 
-    df_predicted_cf_item_based = predict_ratings(
-        similarity, utility_matrix, df_ratings_test[['user_id', 'business_id', 'rating']])
-    mse_item = mse(df_predicted_cf_item_based)
+    # df_ratings_training, df_ratings_test = split_data(
+    #     make_rating_matrix(), d=0.9)
+
+    # df_predicted_cf_item_based = predict_ratings(
+    #     similarity, utility_matrix, df_ratings_test[['user_id', 'business_id', 'rating']])
+    # mse_item = mse(df_predicted_cf_item_based)
 
     # print(df_predicted_cf_item_based)
     # print(mse_item)
     # print(similarity)
     # print(make_rating_matrix())
 
-    if not city:
-        city = random.choice(CITIES)
-    return random.sample(BUSINESSES[city], n)
+    # Predict all ratings
+    all_business_ids = [business["business_id"]
+                        for business in BUSINESSES[city]]
+    all_user_ids = []
+    for _, users in USERS.items():
+        for user in users:
+            all_user_ids.append(user['user_id'])
+
+    for user in all_user_ids:
+        for business in all_business_ids:
+            utility_matrix_copy[user][business] = predict_ids(
+                similarity, utility_matrix, user, business)
+
+    # Remove already rated business
+    already_rated = utility_matrix[user_id].dropna()
+    df = utility_matrix_copy.sort_values(
+        by=[user_id], ascending=False)[user_id].drop(already_rated.index.values).head(10)
+
+    # Get top ten businesses with info
+    top_ten = [get_business(city, i) for i in df.index.values]
+
+    return random.sample(top_ten, n)
