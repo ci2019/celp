@@ -13,12 +13,12 @@ def make_business_matrix(city):
     all_ids = [business["business_id"] for business in BUSINESSES[city]]
     df_business = pd.DataFrame(index=all_ids, columns=['business_id', 'name', 'address', 'city', 'state', 'postal_code',
                                                        'latitude', 'longitude', 'stars', 'review_count', 'is_open', 'attributes', 'categories', 'hours'])
-    for business in BUSINESSES['city']:
+    for business in BUSINESSES[city]:
         b_id = business["business_id"]
         for a in business:
             df_business[a][b_id] = business[a]
 
-    df_business = df_business.set_index('business_id')
+    # df_business = df_business.set_index('business_id')
     return df_business
 
 
@@ -184,6 +184,46 @@ def mse(predicted_ratings):
     return (diff**2).mean()
 
 
+def extract_genres(movies):
+    """Create an unfolded genre dataframe. Unpacks genres seprated by a '|' into seperate rows.
+
+    Arguments:
+    movies -- a dataFrame containing at least the columns 'movieId' and 'genres' 
+              where genres are seprated by '|'
+    """
+    genres_m = movies.apply(lambda row: pd.Series(
+        [row['business_id']] + row['categories'].lower().split(",")), axis=1)
+    stack_genres = genres_m.set_index(0).stack()
+    df_stack_genres = stack_genres.to_frame()
+    df_stack_genres['business_id'] = stack_genres.index.droplevel(1)
+    df_stack_genres.columns = ['categorie', 'business_id']
+    return df_stack_genres.reset_index()[['business_id', 'categorie']]
+
+
+def pivot_categories(df):
+    """Create a one-hot encoded matrix for genres.
+
+    Arguments:
+    df -- a dataFrame containing at least the columns 'movieId' and 'genre'
+
+    Output:
+    a matrix containing '0' or '1' in each cell.
+    1: the movie has the genre
+    0: the movie does not have the genre
+    """
+    return df.pivot_table(index='business_id', columns='categorie', aggfunc='size', fill_value=0)
+
+
+def create_similarity_matrix_categories(matrix):
+    """Create a  """
+    npu = matrix.values
+    m1 = npu @ npu.T
+    diag = np.diag(m1)
+    m2 = m1 / diag
+    m3 = np.minimum(m2, m2.T)
+    return pd.DataFrame(m3, index=matrix.index, columns=matrix.index)
+
+
 def recommend(user_id=None, business_id=None, city=None, n=10):
     """
     Returns n recommendations as a list of dicts.
@@ -201,6 +241,23 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
     # Recommendation for business page
     if business_id:
         print("Business id found!", business_id)
+        a = pivot_categories(extract_genres(make_business_matrix(city)))
+        df_similarity_genres = create_similarity_matrix_categories(a)
+        df_categories = df_similarity_genres.sort_values(
+            by=[business_id], ascending=True)[business_id]
+        # Get top ten businesses with info
+        top_ten = [get_business(city, i) for i in df_categories.index.values]
+
+        # MSE testing
+        df_ratings_training, df_ratings_test = split_data(
+            make_rating_matrix(), d=0.9)
+        utility_matrix = pivot_ratings(make_rating_matrix())
+        predicted_ratings = predict_ratings(df_similarity_genres, utility_matrix, df_ratings_test[[
+                                            'user_id', 'business_id', 'rating']])
+        mse_genres = mse(predicted_ratings)
+        print("MSE content based:", mse_genres)
+
+        return random.sample(top_ten, n)
 
     # Recommendation for home page of user
     if not city:
@@ -214,17 +271,12 @@ def recommend(user_id=None, business_id=None, city=None, n=10):
     similarity = create_similarity_matrix_cosine(utility_matrix)
     utility_matrix_copy = utility_matrix.copy()
 
-    # df_ratings_training, df_ratings_test = split_data(
-    #     make_rating_matrix(), d=0.9)
-
-    # df_predicted_cf_item_based = predict_ratings(
-    #     similarity, utility_matrix, df_ratings_test[['user_id', 'business_id', 'rating']])
-    # mse_item = mse(df_predicted_cf_item_based)
-
-    # print(df_predicted_cf_item_based)
-    # print(mse_item)
-    # print(similarity)
-    # print(make_rating_matrix())
+    # MSE testing
+    df_ratings_test = split_data(make_rating_matrix(), d=0.9)
+    df_predicted_cf_item_based = predict_ratings(
+        similarity, utility_matrix, df_ratings_test[['user_id', 'business_id', 'rating']])
+    mse_item = mse(df_predicted_cf_item_based)
+    print("MSE item based:", mse_item)
 
     # Predict all ratings
     all_business_ids = [business["business_id"]
